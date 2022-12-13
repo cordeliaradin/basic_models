@@ -1,0 +1,206 @@
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(dplyr)
+library(vtable)
+library(aod)
+library(ggplot2)
+library(leaps) 
+library(tidyr)
+
+#import dataset via console
+df<-titanic_train
+
+ncol(df)
+colnames(df)
+st(df)
+
+```
+
+
+```{r}
+df %>%
+  group_by(Survived) %>%
+  summarize(n())
+
+df %>%
+  group_by(Survived, Pclass) %>%
+  summarize(n())
+```
+regarding the binary question of whether or not someone would survive this event, and which factors were the greatest predictors - a logistic regression is the definitive choice
+```{r}
+sapply(df, sd)#stddev
+#na
+sum(is.na(df$Age))
+
+df_age_edited<-df %>% drop_na(Age)
+sapply(df_age_edited, sd)#stddev
+sd(df_age_edited$Age)
+```
+```{r}
+xtabs(~Survived+Sex+Pclass, data = df)
+
+#use all of the potential vaiables to select the model with the best subset
+bestsub.model <- regsubsets(Survived ~ Pclass + 
+                              Sex + Age + 
+                              Fare+ SibSp + Parch, 
+                            data = df_age_edited, nvmax =6)
+
+summary(bestsub.model)
+```
+that wasn't especially helpful in eliminating choices so lets look at other criteria
+
+(also i tried treating Pclass like a catergorical variable as.factor at this stage and did not impact the model)
+
+CP - Mallows's Cp is used to assess the fit of a regression model that has been estimated using ordinary least squares. It is applied in the context of model selection, where a number of predictor variables are available for predicting some outcome, and the goal is to find the best model involving a subset of these predictors. A small value of Cp means that the model is relatively precise
+
+R^2 - how much variance can be explained by the model
+
+ADJUSTED R^2 - Adjusted R-squared is a modified version of R-squared that has been adjusted for the number of predictors in the model. The adjusted R-squared increases when the new term improves the model more than would be expected by chance. It decreases when a predictor improves the model by less than expected.
+
+BIC - Bayesian information criterion aka Schwarz information criterion (also SIC, SBC, SBIC) is a criterion for model selection among a finite set of models; models with lower BIC are generally preferred
+```{r}
+
+
+  cbind( 
+    Cp     = summary(bestsub.model)$cp,
+    r2     = summary(bestsub.model)$rsq,
+    Adj_r2 = summary(bestsub.model)$adjr2,
+    BIC    =summary(bestsub.model)$bic
+)
+
+```
+BEST:
+CP 4
+R^2 4-6
+AR^2 4
+BIC 4
+
+Model with 4 predictors is optimum
+Pclass, Age, Sex, SibSp(#sibs spouse on ship)
+
+
+
+```{r}
+logistic_reg.model <- glm(Survived ~ Pclass + Sex + Age + SibSp, data = df_age_edited, family = "binomial")
+
+summary(logistic_reg.model)
+```
+The indicator variables for passenger class are interpreted by class: if a passenger were in 2nd class accomadations vs being in 1rst class, changes the log odds of survival by -1.317398
+
+If a passenger identifies as a male, this decreases the log odds of survival by -2.623483
+
+For every additional year in Age, the log odds of survival (vs death) decreases by -0.044385
+
+And for every additional sibling or spouse on the ship, decrease log odds of survival by -0.376119
+
+```{r}
+#confidence intervals for each of the variables
+confint(logistic_reg.model)
+
+wald.test(b = coef(logistic_reg.model), Sigma = vcov(logistic_reg.model), Terms = 2:5)
+```
+wald test with all variables results in a pvalue of 0, therefore all are significant
+
+```{r}
+exp(coef(logistic_reg.model))
+
+exp(cbind(OR = coef(logistic_reg.model), confint(logistic_reg.model)))
+```
+odds ratio
+```{r}
+#lets treat passenger class as a categorical variable now
+df_age_edited$Pclass <- factor(df_age_edited$Pclass)
+
+logistic_reg.model2 <- glm(Survived ~ Pclass + Sex + Age + SibSp, data = df_age_edited, family = "binomial")
+
+exp(coef(logistic_reg.model2))
+```
+
+```{r}
+summary(logistic_reg.model)
+```
+
+```{r}
+summary(logistic_reg.model2)#model with Pclass as catgorical
+```
+this really teases out the differences in passenger class
+
+now probabilities
+
+```{r}
+df_age_edited2<-df_age_edited
+
+newdata1 <- with(df_age_edited2, data.frame(Sex=Sex, Age = mean(Age), SibSp = mean(SibSp), Pclass = factor(1:3)))
+
+newdata1
+
+newdata1$rankP <- predict(logistic_reg.model2, newdata = newdata1, type = "response")
+newdata1
+```
+
+holding age, sibsp as mean, here are the probabilities of survival for each class:
+1rst class F: 0.94321328
+1rst class M: 0.54545194 
+2nd class F: 0.80148956
+2nd class M: 0.22582306 
+3rd class F: 0.53926206
+3rd class M: 0.07796618 
+
+```{r}
+
+ggplot(newdata1, aes(x=Sex, y=rankP)) + 
+  geom_point(alpha=.5) 
+
+```
+
+there is no R2 value for logistic regression. Instead, we can compute a metric known as McFadden’s R2, which ranges from 0 to just under 1. Values close to 0 indicate that the model has no predictive power. In practice, values over 0.40 indicate that a model fits the data very well.
+
+```{r}
+library(pscl)
+pscl::pR2(logistic_reg.model2)["McFadden"]
+
+```
+
+```{r}
+library(caret)
+
+test_df<-titanic_test
+test_df$Pclass <- factor(test_df$Pclass)
+test_df<-test_df %>% drop_na(Age)
+
+
+predicted <- predict(logistic_reg.model2, test_df, type="response")
+
+
+predicted <- predict(logistic_reg.model2, df_age_edited2, type="response")
+
+
+
+c1<-df_age_edited2$Survived
+c2<-predicted
+c2[c2 < .5] = 0
+c2[c2 >= .5] = 1
+c1<-as.factor(c1)#get thrown levels error if dont make as factor even though same type
+c2<-as.factor(c2)
+
+#Creating confusion matrix
+example <- confusionMatrix(c1,c2)
+
+#Display results 
+example
+
+```
+
+here on the diagonals we can see that we had 361 true negative and 212 true positive.
+and then we have our types 1&2
+False Positive: Type 1 Error (predicted survive and they died)
+78
+False Negative: Type 2 Error (predicted dead and they survived)
+63
+
+
+
