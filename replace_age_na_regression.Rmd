@@ -1,0 +1,140 @@
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r }
+library(dplyr)
+library(sjlabelled)
+library(readr)
+titanic_test <- read_csv("/Users/cordeliaradin/Desktop/datasets/titanic_test.csv")
+titanic_train <- read_csv("/Users/cordeliaradin/Desktop/datasets/titanic_train.csv")
+df1<-titanic_train
+df2<-titanic_test
+df2<-data.frame(Survived=rep("None",nrow(df2)),df2[,])#add survived column
+df<-rbind(df1, df2)
+
+sum(is.na(df$Embarked))
+df$Embarked[is.na(df$Embarked)] <- 'S'
+sum(is.na(df$Embarked))
+
+sum(is.na(df$Age))
+
+```
+
+263 missing ages in 1309 obs
+
+```{r}
+sum(is.na(df$Age))
+#263 na values
+age_subset <-  df[complete.cases(df$Age), ] 
+#all the ages without na values
+
+#lets get rid of outliers
+
+boxplot(age_subset$Age, horizontal = TRUE, axes = TRUE, staplewex = 1)
+text(x = boxplot.stats(age_subset$Age)$stats, labels = boxplot.stats(age_subset$Age)$stats, y = 1.25)
+
+clean_df<-age_subset[age_subset$Age <=66, ] 
+#now i took out the outliers and the na values
+
+```
+
+
+```{r}
+library(leaps)
+bestsub.model <- regsubsets(Age~Pclass + 
+                              Sex + Age + 
+                              Fare+ SibSp + Parch+ Embarked, 
+                            data = clean_df, nvmax =8)
+
+summary(bestsub.model)
+
+  cbind( 
+    Cp     = summary(bestsub.model)$cp,
+    r2     = summary(bestsub.model)$rsq,
+    Adj_r2 = summary(bestsub.model)$adjr2,
+    BIC    =summary(bestsub.model)$bic
+)
+```
+
+i am not including survived bc it is not a valid predictor for age
+
+CP - 5,6
+R^2 - 5-7
+R^2ADJ - 6
+BIC - 3
+
+CP - Mallows's Cp is used to assess the fit of a regression model that has been estimated using ordinary least squares. It is applied in the context of model selection, where a number of predictor variables are available for predicting some outcome, and the goal is to find the best model involving a subset of these predictors. A small value of Cp means that the model is relatively precise
+
+R^2 - how much variance can be explained by the model
+
+ADJUSTED R^2 - Adjusted R-squared is a modified version of R-squared that has been adjusted for the number of predictors in the model. The adjusted R-squared increases when the new term improves the model more than would be expected by chance. It decreases when a predictor improves the model by less than expected.
+
+BIC - Bayesian information criterion aka Schwarz information criterion (also SIC, SBC, SBIC) is a criterion for model selection among a finite set of models; models with lower BIC are generally preferred
+
+6 predictos: Pclass Sexmale SibSp Parch EmbarkedQ EmbarkedS
+translates to these 5: Pclass Sex SibSp Parch Embarked
+
+```{r}
+reg.model = lm(Age~Pclass +Sex +SibSp+ Parch +Embarked, data = clean_df) 
+summary(reg.model) 
+
+```
+
+```{r}
+
+reg.model2 = lm(Age~Pclass +Sex +SibSp+Embarked, data = clean_df) 
+summary(reg.model2) 
+```
+parch removed due to significance and complexity
+
+now we have a model
+
+```{r}
+sum(is.na(df$Age))
+summary(df$Age)
+
+#take na values with columns i want
+na_ages<-df[is.na(df$Age), c("Pclass","Sex","SibSp","Embarked", "Age")]
+
+predicted_ages<-predict(reg.model2, newdata = na_ages)
+
+summary(df$Age)
+
+
+
+
+```
+
+
+```{r}
+df[is.na(df$Age),"Age"]<-predicted_ages
+summary(df$Age)
+sum(is.na(df$Age))
+```
+
+now need to make sure we have the separate labeled training dataset as well - the combined dataset is not fully labeled
+
+```{r}
+summary(df1$Age)
+sum(is.na(df1$Age))
+#take na values with columns i want
+na_ages2<-df1[is.na(df1$Age), c("Pclass","Sex","SibSp","Embarked", "Age")]
+predicted_ages2<-predict(reg.model2, newdata = na_ages2)
+df1[is.na(df1$Age),"Age"]<-predicted_ages2
+summary(df1$Age)
+```
+
+now save for use :)
+
+```{r}
+write.csv(df, "/Users/cordeliaradin/Desktop/datasets/age_complete_titanic.csv", row.names=FALSE)
+
+write.csv(df1, "/Users/cordeliaradin/Desktop/datasets/age_complete_titanic_training.csv", row.names=FALSE)
+
+```
+
+
+
