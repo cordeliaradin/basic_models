@@ -1,4 +1,6 @@
 # basic_models
+author: cordelia radin
+
 basic statistical models
 
 the datasets for the titanic were sourced from kaggle and can be found here https://www.kaggle.com/competitions/titanic/data
